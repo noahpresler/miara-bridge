@@ -126,7 +126,24 @@ MIARA_LIVE=1 python -m unittest tests.test_live_sandbox   # opt-in, uses the san
 
 ## With an agent
 
-`skills/miara-bridge/SKILL.md` is a skill that walks a coding agent through all of this: asking where your data comes from, writing `fetch` and `map`, testing on the sandbox, and scheduling. Copy the folder into your agent's skills directory.
+`skills/miara-bridge/SKILL.md` is a skill that walks a coding agent through all of this: asking where your data comes from, writing `fetch` and `map`, testing on the sandbox, and scheduling.
+
+In Claude Code:
+
+```sh
+claude plugin marketplace add noahpresler/miara-bridge
+claude plugin install miara-bridge@miara
+```
+
+In another agent:
+
+```sh
+npx skills add noahpresler/miara-bridge --skill miara-bridge
+```
+
+Or paste this into your agent:
+
+> Install the Miara bridge skill. If you're in Claude Code, run `claude plugin marketplace add noahpresler/miara-bridge`, then `claude plugin install miara-bridge@miara`. If you're in another agent, run `npx skills add noahpresler/miara-bridge --skill miara-bridge` and select your agent. Use one installation method. You can read the skill directly at https://github.com/noahpresler/miara-bridge/blob/main/skills/miara-bridge/SKILL.md (raw: https://raw.githubusercontent.com/noahpresler/miara-bridge/main/skills/miara-bridge/SKILL.md). Then use the Miara bridge skill to help me send my device's data to Miara.
 
 ## License
 

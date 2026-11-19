@@ -1,0 +1,12 @@
+{
+  "name": "miara-bridge",
+  "version": "1.0.0",
+  "description": "Build a bridge that sends your own device or service data to your family's Miara log.",
+  "author": {
+    "name": "Miara",
+    "url": "https://getmiara.com/developers"
+  },
+  "homepage": "https://getmiara.com/developers",
+  "repository": "https://github.com/noahpresler/miara-bridge",
+  "license": "MIT"
+}

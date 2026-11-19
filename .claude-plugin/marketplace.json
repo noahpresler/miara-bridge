@@ -1,0 +1,16 @@
+{
+  "name": "miara",
+  "description": "Skills for building on the Miara API.",
+  "owner": {
+    "name": "Miara",
+    "url": "https://getmiara.com/developers"
+  },
+  "plugins": [
+    {
+      "name": "miara-bridge",
+      "source": "./",
+      "description": "Build a bridge that sends your own device or service data to your family's Miara log.",
+      "version": "1.0.0"
+    }
+  ]
+}
