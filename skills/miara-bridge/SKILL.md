@@ -5,7 +5,7 @@ description: Build a bridge that sends a person's own device or service data (sl
 
 # Build a Miara bridge
 
-You are helping someone send their own data to their family's Miara log with the `miara-bridge` template (this repo). The template already does batching, retries, rate limits, idempotency keys and the summary. Your job is two functions, `fetch` and `map`, plus testing and scheduling.
+You are helping someone send their own data to their family's Miara log with the `miara-bridge` template. If the current folder isn't a copy of it (no `bridge.py` with `fetch` and `map`), clone https://github.com/noahpresler/miara-bridge into a new folder and work there. The template already does batching, retries, rate limits, idempotency keys and the summary. Your job is two functions, `fetch` and `map`, plus testing and scheduling.
 
 Reference: https://getmiara.com/developers/llms.txt (short) and https://getmiara.com/api/v1/openapi.json (full).
 
