@@ -34,6 +34,8 @@ class FakeHttp:
         r = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
         if isinstance(r, Exception):
             raise r
+        if callable(r):  # answers from what was sent, like Miara does
+            return r(json.loads(data) if data else None)
         return r
 
 
@@ -182,7 +184,7 @@ class SendTests(unittest.TestCase):
         self.assertEqual([c["url"].rsplit("/", 1)[-1] for c in http.calls], ["metrics", "observations:batch"])
         self.assertEqual(s["declared"], ["x.sample.score"])
         http2 = FakeHttp(Resp(200, {"saved": 0, "received": 1}))
-        bridge.send(client(http2), CHILD, [], readings, state)
+        bridge.send(client(http2), CHILD, [], [dict(readings[0], value=81)], state)
         self.assertEqual(len(http2.calls), 1)  # already declared
 
     def test_summary_lists_reasons(self):
@@ -214,6 +216,52 @@ class ReplayTests(unittest.TestCase):
         self.assertIn("saved nothing twice", "\n".join(lines))
 
 
+class OnlyWhatChangedTests(unittest.TestCase):
+    def test_unchanged_rows_are_not_sent_again(self):
+        e = [{"source_event_id": "s:a", "kind": "sleep", "started_at": "2026-11-18T09:00:00Z"}]
+        r = [{"metric": "humidity", "started_at": "2026-11-18T09:00:00Z", "value": 40}]
+        state = {}
+        bridge.send(client(FakeHttp(Resp(200, {"results": [{"source_event_id": "s:a", "status": "saved"}]}),
+                                    Resp(200, {"saved": 1, "received": 1}))), CHILD, e, r, state)
+        http = FakeHttp(Resp(500))
+        self.assertEqual(bridge.send(client(http), CHILD, e, r, state)["sent"], 0)
+        self.assertEqual(http.calls, [])
+        # The sleep gets its end: only it goes again.
+        http = FakeHttp(Resp(200, {"results": [{"source_event_id": "s:a", "status": "updated"}]}))
+        bridge.send(client(http), CHILD, [dict(e[0], ended_at="2026-11-18T10:00:00Z")], r, state)
+        self.assertEqual(len(http.calls), 1)
+
+    def test_rejected_rows_are_tried_again(self):
+        e = [{"source_event_id": "a", "kind": "sleep", "started_at": "2026-11-18T09:00:00Z"}]
+        state = {}
+        bridge.send(client(FakeHttp(Resp(200, {"results": [{"source_event_id": "a", "status": "rejected", "error": "x"}]}))), CHILD, e, [], state)
+        http = FakeHttp(Resp(200, {"results": [{"source_event_id": "a", "status": "saved"}]}))
+        bridge.send(client(http), CHILD, e, [], state)
+        self.assertEqual(len(http.calls), 1)
+
+    def test_a_row_can_name_its_own_child(self):
+        http = FakeHttp(Resp(200, {"results": []}))
+        rows = [{"source_event_id": "a", "kind": "diaper", "started_at": "2026-11-18T09:00:00Z", "child_id": "other"},
+                {"source_event_id": "b", "kind": "diaper", "started_at": "2026-11-18T09:00:00Z"}]
+        bridge.send(client(http), CHILD, rows, [])
+        self.assertEqual([e["child_id"] for e in http.calls[0]["body"]["entries"]], ["other", CHILD])
+
+
+class WaitTests(unittest.TestCase):
+    def test_returns_early_when_miara_asks(self):
+        http = FakeHttp(Resp(200, {"woken": False}), Resp(200, {"woken": True}))
+        self.assertTrue(bridge.wait_for_next(client(http), 120, {}, sleep=lambda s: None))
+        self.assertIn("/wait?timeout=25", http.calls[0]["url"])
+
+    def test_older_miara_gets_a_plain_sleep(self):
+        http = FakeHttp(Resp(404, {"error": {"code": "not_found", "message": "No such endpoint."}}))
+        slept, state = [], {}
+        self.assertFalse(bridge.wait_for_next(client(http), 120, state, sleep=slept.append))
+        self.assertTrue(state["wait_unsupported"])
+        self.assertEqual(len(http.calls), 1)
+        self.assertEqual(len(slept), 1)
+
+
 class MainTests(unittest.TestCase):
     def run_main(self, args, http, tmp):
         env = {"MIARA_BASE": "https://example.test/api/v1"}
@@ -229,9 +277,9 @@ class MainTests(unittest.TestCase):
                 os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
     def ok_http(self):
-        def many(n):
-            return Resp(200, {"results": [{"source_event_id": "x", "status": "saved"}] * n})
-        return FakeHttp(Resp(200, {"children": [{"id": CHILD}]}), many(5), Resp(200, {"metric": "x.sample.score", "saved": True}),
+        def saved(body):
+            return Resp(200, {"results": [{"source_event_id": e["source_event_id"], "status": "saved"} for e in body["entries"]]})
+        return FakeHttp(Resp(200, {"children": [{"id": CHILD}]}), saved, Resp(200, {"metric": "x.sample.score", "saved": True}),
                         Resp(200, {"saved": 11, "received": 11}))
 
     def test_second_run_sends_nothing_and_state_is_written(self):
