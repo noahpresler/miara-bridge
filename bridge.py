@@ -7,7 +7,8 @@ Three parts:
   map(items)    YOURS. Turn what fetch returned into Miara entries and readings.
   send(...)     DONE. Batches, idempotency keys, retries, limits, a summary.
 
-Run it:   python bridge.py --sandbox            (public sandbox, made-up family)
+Run it:   python bridge.py setup                (connect to your family: sign in, approve, done)
+          python bridge.py --sandbox            (public sandbox, made-up family)
           python bridge.py --sandbox --dry-run  (show what it would send, send nothing)
           python bridge.py                      (your family: needs MIARA_TOKEN, MIARA_CHILD_ID)
           python bridge.py --every 120          (keep running; sooner when someone opens Miara)
@@ -482,6 +483,25 @@ def wait_for_next(client: Client, seconds: float, state: dict, clock=time.monoto
 
 
 def main(argv: list[str] | None = None, http=None, sleep=time.sleep, now=None) -> int:
+    import link
+    link.load_env()
+    given = list(sys.argv[1:] if argv is None else argv)
+    if given[:1] == ["setup"]:
+        sp = argparse.ArgumentParser(prog="bridge.py setup", description="Connect this bridge to your Miara family by signing in.")
+        sp.add_argument("--name", default="Device bridge", help="what it's called in Miara (up to 40 characters)")
+        sp.add_argument("--read", action="store_true", help="also ask to read the log (not needed to send)")
+        sa = sp.parse_args(given[1:])
+        scopes = ["write:events", "write:observations"] + (["read"] if sa.read else [])
+        client = Client(os.environ.get("MIARA_BASE", DEFAULT_BASE), "", http=http, sleep=sleep)
+        try:
+            return link.setup(client, name=sa.name, scopes=scopes, sleep=sleep)
+        except BridgeError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            print("\nStopped. Run python bridge.py setup to start again.")
+            return 130
+
     ap = argparse.ArgumentParser(description="Send your own device's data to Miara.")
     ap.add_argument("--every", type=int, metavar="SECONDS",
                     help="keep running: sync, then again after SECONDS (or sooner when someone opens Miara)")
@@ -521,8 +541,8 @@ def main(argv: list[str] | None = None, http=None, sleep=time.sleep, now=None) -
 
     try:
         if not token and not args.dry_run:
-            raise BridgeError("No token. Make one in the app (Profile → Siri, assistants and connections → New connection), "
-                              "then set MIARA_TOKEN. To try it without one, run with --sandbox.")
+            raise BridgeError("No token. Run python bridge.py setup to connect by signing in to Miara "
+                              "(or make one in the app and set MIARA_TOKEN). To try it without one, run with --sandbox.")
         if USING_SAMPLE_DATA and not args.sandbox and not args.dry_run:
             raise BridgeError("fetch() is still the made-up sample, so this won't send it to a real family. "
                               "Write your own fetch() and map(), then set USING_SAMPLE_DATA = False. "

@@ -58,9 +58,11 @@ Read the summary with the person. `saved` and `unchanged` are good. `suggested` 
 
 Add a unit test for `map` with a couple of real-shaped sample items (with names and values changed or made up).
 
-### 5. Make a token
+### 5. Connect to their family
 
-Only when the sandbox run is right. Tell the person to open the Miara app: **Profile → Siri, assistants and connections → New connection**. Name it after the device, pick the child, and pick only the scopes the bridge needs (`write:events` for entries, `write:observations` for readings). The token starts with `miara_pat_` and is shown once. They put it in `.env` as `MIARA_TOKEN`, with the child's id as `MIARA_CHILD_ID`. Don't ask them to paste it to you.
+Only when the sandbox run is right. Have the person run `python bridge.py setup --name "<device> bridge"` themselves, in their own terminal (add `--read` only if your code reads the log). It opens a Miara page, or prints a link, code and QR code; they sign in, check the code, choose the child and approve, and the bridge saves `MIARA_TOKEN` (and `MIARA_CHILD_ID` for one child) to `.env`. Don't run it for them and don't ask for the token.
+
+If that can't work for them, the fallback is the app: **Profile → AI Assistants, Apps, & Devices → New connection**, scopes `write:events` and `write:observations`, token into `.env` as `MIARA_TOKEN`.
 
 Then `python bridge.py --dry-run` and `python bridge.py` against their real family, and check the log in the app shows the entries under the connection's name.
 

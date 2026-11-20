@@ -1,1 +1,2 @@
 requests>=2.31
+segno>=1.6  # optional: shows setup's link as a QR code in the terminal
