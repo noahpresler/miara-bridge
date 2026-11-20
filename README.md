@@ -113,7 +113,7 @@ The Action is optional, and it has a cost. A bridge is meant to run where your d
 - **Every write is idempotent.** Each request carries an `Idempotency-Key` made from its content. Send the same batch again within 24 hours and Miara returns the first answer and saves nothing twice. Entries also carry your `source_event_id`: sending one again updates that entry instead of adding another. Readings are kept to the minute, one per child, metric and minute; a resend replaces it.
 - **Overlaps come back `suggested`.** If a device's sleep overlaps one a person logged, it isn't saved twice. It waits for them to answer. If they answer or delete it, a resend comes back `skipped`. Don't work around either.
 - **Vitals are records.** Heart rate, oxygen and breathing rate are kept and charted with real axes. Miara never interprets them, and neither should your bridge: no "normal", no "concerning", no advice.
-- **Numbers and choices only.** No free text, no notes, nothing a person wrote.
+- **Readings are numbers or choices.** The only free text is an entry's `note`: what a person typed about it in the device's own app.
 - **Be gentle.** 120 requests a minute per token, 500 rows and 4 MB a request. On a 429 the bridge waits `Retry-After` and resends. On a daily limit it stops and tells you; the next run picks up where it left off. On a 5xx it backs off and tries again, up to five times.
 - **Everything is the family's.** Anything you send shows in the log "via" your connection's name. They can undo all of it in one tap.
 
