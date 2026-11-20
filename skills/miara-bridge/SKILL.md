@@ -60,7 +60,9 @@ Add a unit test for `map` with a couple of real-shaped sample items (with names 
 
 ### 5. Connect to their family
 
-Only when the sandbox run is right. Have the person run `python bridge.py setup --name "<device> bridge"` themselves, in their own terminal (add `--read` only if your code reads the log). It opens a Miara page, or prints a link, code and QR code; they sign in, check the code, choose the child and approve, and the bridge saves `MIARA_TOKEN` (and `MIARA_CHILD_ID` for one child) to `.env`. Don't run it for them and don't ask for the token.
+Every bridge connects this way: `setup` is the first thing its install script runs after the device sign-in. If you write an `install.sh` for the person, have it run `python bridge.py setup --name "<device> bridge"`.
+
+Only when the sandbox run is right. Have the person run `python bridge.py setup --name "<device> bridge"` themselves, in their own terminal (add `--read` only if your code reads the log). It opens Miara in their browser (or prints the link when none can open); they sign in, check the code, choose the child and approve, and the bridge saves `MIARA_TOKEN` (and `MIARA_CHILD_ID` for one child) to `.env`. Don't run it for them and don't ask for the token.
 
 If that can't work for them, the fallback is the app: **Profile → AI Assistants, Apps, & Devices → New connection**, scopes `write:events` and `write:observations`, token into `.env` as `MIARA_TOKEN`.
 

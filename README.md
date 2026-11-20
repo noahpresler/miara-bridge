@@ -6,7 +6,7 @@ A **bridge** runs on your machine. It asks a device or service for what's new, u
 
 This repo is the template. The part that's yours is one function, `fetch`. The rest is done: batching, retries, rate limits, idempotency, a summary of what happened.
 
-- Python 3.10 or newer, and `requests`. `segno` (optional, in requirements.txt) draws the setup link as a QR code. The `python3` that comes with macOS is 3.9: get a newer one with `brew install python` or [uv](https://docs.astral.sh/uv/).
+- Python 3.10 or newer, and one dependency, `requests`. The `python3` that comes with macOS is 3.9: get a newer one with `brew install python` or [uv](https://docs.astral.sh/uv/).
 - The API: <https://getmiara.com/developers> (plain-text version for agents: <https://getmiara.com/developers/llms.txt>).
 
 ## Try it in five minutes
@@ -70,7 +70,7 @@ DEVICE_PASSWORD=...
 
 ### Your real family
 
-1. `python bridge.py setup --name "Nursery bridge"`. It opens a Miara page in your browser (on a computer with no screen it prints the link, a code and, with `segno` installed, a QR code to scan with your phone). Sign in to Miara, check the code matches, choose the children and approve. The bridge saves its token to `.env` as `MIARA_TOKEN`, and the child's id as `MIARA_CHILD_ID` when there's one. It asks to add entries and readings; add `--read` if your code also reads the log.
+1. `python bridge.py setup --name "Nursery bridge"`. It opens Miara in your browser, like `gh auth login` (over SSH or with no screen, it prints the link to open elsewhere). Sign in to Miara, check the code matches, choose the children and approve. The bridge saves its token to `.env` as `MIARA_TOKEN`, and the child's id as `MIARA_CHILD_ID` when there's one. It asks to add entries and readings; add `--read` if your code also reads the log.
 2. `python bridge.py --dry-run`, then `python bridge.py`.
 
 Or make the token yourself: in the Miara app, Profile → AI Assistants, Apps, & Devices → New connection. Give it a name, pick the children and the scopes (`write:events` for entries, `write:observations` for readings). The token is shown once. Put it in `.env` as `MIARA_TOKEN`, and the child's id in `MIARA_CHILD_ID` (or pass `--child`). `GET /children` lists the ids.
