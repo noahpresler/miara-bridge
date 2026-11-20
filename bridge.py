@@ -397,6 +397,7 @@ def send(client: Client, child_id: str | None, entries: list[dict], readings: li
                 summary["reasons"].append((status, r.get("source_event_id"), r.get("error") or _STATUS_WORDS[status]))
             if status != "rejected":
                 done.add(r.get("source_event_id"))
+            note_kept(r, state, summary)
         mark_sent([e for e in batch if e["source_event_id"] in done], state, entry_key, now)
     if readings:
         summary["declared"] = declare_metrics(client, readings, state)
@@ -408,6 +409,32 @@ def send(client: Client, child_id: str | None, entries: list[dict], readings: li
     summary["replayed"] = client.replayed - replayed_before
     summary["sent"] = len(entries) + len(readings)
     return summary
+
+
+def note_kept(result: dict, state: dict, summary: dict) -> None:
+    """Remember what someone changed in Miara, so the bridge stops treating it as the device has it.
+
+    `kept` lists the fields (started_at, ended_at, details) a person changed, which later sends don't
+    move back; the result's started_at and ended_at are the entry as it is now. `joined` means the
+    sleep merged into a timer someone started in the app.
+    """
+    sid = result.get("source_event_id")
+    if result.get("joined"):
+        summary["reasons"].append(("joined", sid, "someone was timing this sleep in Miara; it joined their timer"))
+    if result.get("kept"):
+        state.setdefault("kept", {})[sid] = {
+            "fields": result["kept"], "started_at": result.get("started_at"), "ended_at": result.get("ended_at")}
+        summary["reasons"].append(("kept", sid, "someone changed " + ", ".join(result["kept"]) + " in Miara; that stays"))
+
+
+def ended_in_miara(state: dict, source_event_id: str) -> str | None:
+    """When someone ended this sleep in Miara: its end as Miara has it, else None.
+
+    Check it before counting a sleep as still going (a live screen, a "watch until it ends" loop):
+    a sleep someone ended isn't reopened by later sends, however long the device keeps it open.
+    """
+    k = state.get("kept", {}).get(source_event_id)
+    return k["ended_at"] if k and "ended_at" in k["fields"] else None
 
 
 _STATUS_WORDS = {

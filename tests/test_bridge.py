@@ -205,6 +205,32 @@ class SendTests(unittest.TestCase):
         self.assertIn("rejected before sending: z", text)
 
 
+class KeptTests(unittest.TestCase):
+    def test_kept_and_joined_are_remembered_and_reported(self):
+        http = FakeHttp(Resp(200, {"results": [
+            {"source_event_id": "s:a", "status": "unchanged", "kept": ["ended_at"],
+             "started_at": "2026-11-18T09:00:00Z", "ended_at": "2026-11-18T09:40:00Z"},
+            {"source_event_id": "s:b", "status": "updated", "joined": True},
+        ]}))
+        entries = [{"source_event_id": s, "kind": "sleep", "started_at": "2026-11-18T09:00:00Z"} for s in ("s:a", "s:b")]
+        state = {}
+        s = bridge.send(client(http), CHILD, entries, [], state)
+        self.assertEqual(bridge.ended_in_miara(state, "s:a"), "2026-11-18T09:40:00Z")
+        self.assertIsNone(bridge.ended_in_miara(state, "s:b"))
+        lines = []
+        bridge.print_summary(s, [], out=lines.append)
+        text = "\n".join(lines)
+        self.assertIn("kept: s:a: someone changed ended_at in Miara", text)
+        self.assertIn("joined: s:b", text)
+
+    def test_a_kept_start_alone_leaves_the_sleep_open(self):
+        http = FakeHttp(Resp(200, {"results": [{"source_event_id": "s:a", "status": "updated", "kept": ["started_at"],
+                                                "started_at": "2026-11-18T08:55:00Z", "ended_at": None}]}))
+        state = {}
+        bridge.send(client(http), CHILD, [{"source_event_id": "s:a", "kind": "sleep", "started_at": "2026-11-18T09:00:00Z"}], [], state)
+        self.assertIsNone(bridge.ended_in_miara(state, "s:a"))
+
+
 class ReplayTests(unittest.TestCase):
     def test_replay_is_noted(self):
         http = FakeHttp(Resp(200, {"results": [{"source_event_id": "a", "status": "saved"}]}, {"Idempotent-Replayed": "true"}))
