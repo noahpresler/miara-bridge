@@ -9,6 +9,9 @@
   Stop it: launchctl bootout gui/$(id -u)/com.example.miara-bridge
 
   launchd doesn't read .env, so the command loads it first.
+
+  To keep it running instead (python bridge.py --every 120): add --every 120 after bridge.py,
+  and replace StartInterval with  <key>KeepAlive</key><true/>  so launchd restarts it if it stops.
 -->
 <plist version="1.0">
 <dict>

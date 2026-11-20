@@ -10,6 +10,7 @@ Three parts:
 Run it:   python bridge.py --sandbox            (public sandbox, made-up family)
           python bridge.py --sandbox --dry-run  (show what it would send, send nothing)
           python bridge.py                      (your family: needs MIARA_TOKEN, MIARA_CHILD_ID)
+          python bridge.py --every 120          (keep running; sooner when someone opens Miara)
 
 Your device login stays in your own environment. This file never sends it to Miara.
 """
@@ -38,6 +39,11 @@ DECLARED_METRICS = [
     {"metric": "x.sample.score", "label": "Sleep score", "unit": "points", "min": 0, "max": 100},
 ]
 
+
+# Each run fetches from this long before the last sync, not from the last sync itself. Most
+# services finish or correct a record after the fact (a sleep gets its end, a feed its amount);
+# re-reading a window catches that. Rows that haven't changed since they were sent aren't sent again.
+LOOKBACK = timedelta(hours=6)
 
 # True while fetch() below is still the made-up sample. A bridge that is still the sample
 # refuses to send to a real family. Set it to False when you've written your own fetch().
@@ -89,7 +95,8 @@ def fetch(since: datetime | None) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def map(items: list[dict]) -> tuple[list[dict], list[dict]]:  # noqa: A001 (shadows the builtin on purpose)
-    """Turn fetched items into (entries, readings). child_id is added for you in send().
+    """Turn fetched items into (entries, readings). child_id is added for you in send(), from
+    MIARA_CHILD_ID. A bridge for several children sets "child_id" on each row instead.
 
     Entries are things that happened: kind is sleep, bottle, nursing, diaper or pump.
         {"source_event_id", "kind", "started_at", "ended_at" (sleeps), "details", "raw"}
@@ -341,27 +348,64 @@ def declare_metrics(client: Client, readings: list[dict], state: dict) -> list[s
     return declared_now
 
 
-def send(client: Client, child_id: str, entries: list[dict], readings: list[dict], state: dict | None = None) -> dict:
-    """Send entries then readings in batches. Returns a summary dict (see print_summary)."""
+def fingerprint(row: dict) -> str:
+    return hashlib.sha256(canonical(row).encode()).hexdigest()[:16]
+
+
+def unsent(rows: list[dict], state: dict, key) -> list[dict]:
+    """Only the rows that changed since they were last sent. A bridge that re-reads the last
+    two days every minute would otherwise send the same rows hundreds of times a day."""
+    sent = state.get("sent", {})
+    return [r for r in rows if sent.get(key(r), {}).get("fp") != fingerprint(r)]
+
+
+def mark_sent(rows: list[dict], state: dict, key, now: str) -> None:
+    sent = state.setdefault("sent", {})
+    for r in rows:
+        sent[key(r)] = {"fp": fingerprint(r), "at": now}
+
+
+def entry_key(e: dict) -> str:
+    return "e:" + e["source_event_id"]
+
+
+def reading_key(r: dict) -> str:
+    return f"r:{r['child_id']}:{r['metric']}:{r['started_at']}"
+
+
+def send(client: Client, child_id: str | None, entries: list[dict], readings: list[dict], state: dict | None = None,
+         now: str | None = None) -> dict:
+    """Send what changed, entries then readings, in batches. Returns a summary dict (see print_summary).
+
+    Each row may carry its own child_id (one bridge, several children); `child_id` fills in the rest.
+    """
     state = state if state is not None else {}
+    now = now or iso(datetime.now(timezone.utc))
+    entries = [dict(e, child_id=e.get("child_id") or child_id) for e in entries]
+    readings = [dict(r, child_id=r.get("child_id") or child_id) for r in readings]
+    entries, readings = unsent(entries, state, entry_key), unsent(readings, state, reading_key)
     replayed_before = client.replayed
     summary = {"replayed": 0, "entries": {s: 0 for s in STATUSES}, "reasons": [], "readings_saved": 0, "readings_received": 0, "declared": []}
     for batch in batches(entries):
-        body = {"entries": [dict(e, child_id=child_id) for e in batch]}
-        res = client.request("POST", "/events:batch", body)
+        res = client.request("POST", "/events:batch", {"entries": batch})
+        done = set()
         for r in res.get("results", []):
             status = r.get("status", "rejected")
             summary["entries"][status] = summary["entries"].get(status, 0) + 1
             if status in ("suggested", "skipped", "rejected"):
                 summary["reasons"].append((status, r.get("source_event_id"), r.get("error") or _STATUS_WORDS[status]))
+            if status != "rejected":
+                done.add(r.get("source_event_id"))
+        mark_sent([e for e in batch if e["source_event_id"] in done], state, entry_key, now)
     if readings:
         summary["declared"] = declare_metrics(client, readings, state)
         for batch in batches(readings):
-            body = {"readings": [dict(r, child_id=child_id) for r in batch]}
-            res = client.request("POST", "/observations:batch", body)
+            res = client.request("POST", "/observations:batch", {"readings": batch})
             summary["readings_saved"] += res.get("saved", 0)
             summary["readings_received"] += res.get("received", len(batch))
+            mark_sent(batch, state, reading_key, now)
     summary["replayed"] = client.replayed - replayed_before
+    summary["sent"] = len(entries) + len(readings)
     return summary
 
 
@@ -411,8 +455,36 @@ def pick_sandbox_child(client: Client) -> str:
     return kids[0]["id"]
 
 
+def wait_for_next(client: Client, seconds: float, state: dict, clock=time.monotonic, sleep=time.sleep) -> bool:
+    """Wait up to `seconds` for the next run. Returns True if Miara asked for it early.
+
+    Miara's GET /wait holds the request open (up to 25 seconds at a time) and answers
+    {"woken": true} as soon as someone in the family opens the app, so a bridge that keeps
+    running picks up new data within seconds instead of at its next turn. A Miara without
+    /wait (404) gets a plain sleep.
+    """
+    deadline = clock() + seconds
+    while (left := deadline - clock()) > 1:
+        if state.get("wait_unsupported"):
+            sleep(left)
+            return False
+        try:
+            if client.request("GET", f"/wait?timeout={int(min(left, 25))}").get("woken"):
+                return True
+        except DailyLimit:
+            raise
+        except BridgeError as exc:
+            if "not_found" in str(exc):
+                state["wait_unsupported"] = True
+            else:
+                sleep(min(left, 30))
+    return False
+
+
 def main(argv: list[str] | None = None, http=None, sleep=time.sleep, now=None) -> int:
     ap = argparse.ArgumentParser(description="Send your own device's data to Miara.")
+    ap.add_argument("--every", type=int, metavar="SECONDS",
+                    help="keep running: sync, then again after SECONDS (or sooner when someone opens Miara)")
     ap.add_argument("--sandbox", action="store_true", help="use the public sandbox token and its first child (made-up family)")
     ap.add_argument("--dry-run", action="store_true", help="fetch and map, print what would be sent, send nothing, keep state as it is")
     ap.add_argument("--child", help="child id (or set MIARA_CHILD_ID)")
@@ -425,6 +497,26 @@ def main(argv: list[str] | None = None, http=None, sleep=time.sleep, now=None) -
     token = SANDBOX_TOKEN if args.sandbox else os.environ.get("MIARA_TOKEN", "")
     child = args.child or os.environ.get("MIARA_CHILD_ID", "")
     state_path = Path(args.state or ("state.sandbox.json" if args.sandbox else "state.json"))
+    if args.every:
+        if args.every < 60:
+            print("Error: --every is at least 60 seconds.", file=sys.stderr)
+            return 1
+        once = [a for a in (argv if argv is not None else sys.argv[1:]) if a != "--every" and a != str(args.every)]
+        client = Client(base, token, http=http, sleep=sleep)
+        state: dict = {}
+        print(f"Running every {args.every} seconds, and right away when someone opens Miara. Ctrl-C to stop.", flush=True)
+        try:
+            while True:
+                code = main(once, http=http, sleep=sleep)
+                sys.stdout.flush()
+                if code == 3:  # daily limit: try again in an hour
+                    sleep(3600)
+                    continue
+                wait_for_next(client, args.every, state, sleep=sleep)
+        except KeyboardInterrupt:
+            print("\nStopped.")
+            return 0
+
     started = (now or datetime.now(timezone.utc))
 
     try:
@@ -442,7 +534,7 @@ def main(argv: list[str] | None = None, http=None, sleep=time.sleep, now=None) -
         elif args.full or not state.get("last_sync"):
             since = None
         else:
-            since = parse_time(state["last_sync"])
+            since = parse_time(state["last_sync"]) - LOOKBACK
 
         items = fetch(since)
         entries, readings = map(items)
@@ -461,16 +553,21 @@ def main(argv: list[str] | None = None, http=None, sleep=time.sleep, now=None) -
             print("Dry run: nothing was sent and the last sync time is unchanged.")
             return 0
 
+        if args.sandbox and not child:
+            child = state.get("sandbox_child", "")
         if not entries and not readings:
             print("Nothing new to send.")
         else:
-            if not child:
+            if not child and any(not row.get("child_id") for row in entries + readings):
                 if args.sandbox:
-                    child = pick_sandbox_child(client)
+                    child = state["sandbox_child"] = pick_sandbox_child(client)
                 else:
                     raise BridgeError("No child. Set MIARA_CHILD_ID (or pass --child). GET /children lists the ids this token is for.")
             summary = send(client, child, entries, readings, state)
-            print_summary(summary, problems)
+            if summary["sent"] or problems:
+                print_summary(summary, problems)
+            else:
+                print("Nothing new to send.")
         state["last_sync"] = iso(started)
         save_state(state_path, state)
         return 0

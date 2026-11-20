@@ -1,6 +1,7 @@
 # Your device login and Miara token. Never commit these.
 .env
 .env.*
+!.env.example
 *.pem
 
 # Where the last sync time lives. It's yours, not the template's.

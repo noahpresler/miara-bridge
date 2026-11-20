@@ -6,7 +6,7 @@ A **bridge** runs on your machine. It asks a device or service for what's new, u
 
 This repo is the template. The part that's yours is one function, `fetch`. The rest is done: batching, retries, rate limits, idempotency, a summary of what happened.
 
-- Python 3.10 or newer, and one dependency, `requests`.
+- Python 3.10 or newer, and one dependency, `requests`. The `python3` that comes with macOS is 3.9: get a newer one with `brew install python` or [uv](https://docs.astral.sh/uv/).
 - The API: <https://getmiara.com/developers> (plain-text version for agents: <https://getmiara.com/developers/llms.txt>).
 
 ## Try it in five minutes
@@ -57,7 +57,7 @@ python bridge.py --sandbox
 
 ### Your device login
 
-It stays on your machine. Put it in the environment your bridge runs in, for example a `.env` file next to `bridge.py`:
+It stays on your machine. If the service gives you a session instead of taking a password every time (most do, and many rotate the refresh token on each use), save the newest one after every refresh, in a file only you can read (`chmod 600`) outside the repo, such as `~/.config/<your-bridge>/session.json`. Never keep the password itself. Put the rest in the environment your bridge runs in, for example a `.env` file next to `bridge.py`:
 
 ```
 MIARA_TOKEN=miara_pat_...
@@ -66,7 +66,7 @@ DEVICE_USER=...
 DEVICE_PASSWORD=...
 ```
 
-`.env` is in `.gitignore`. Your fetch code reads `os.environ["DEVICE_PASSWORD"]`. The bridge never sends it to Miara, and neither should your code: not in `raw`, not anywhere. Miara never asks for your device login or your Miara password.
+`.env` is in `.gitignore` (`.env.example`, with names and no values, is not). Your fetch code reads `os.environ["DEVICE_PASSWORD"]`. The bridge never sends it to Miara, and neither should your code: not in `raw`, not anywhere. Miara never asks for your device login or your Miara password.
 
 ### Your real family
 
@@ -79,18 +79,26 @@ Settings, in the environment:
 | Name | What it does |
 |---|---|
 | `MIARA_TOKEN` | Your token. |
-| `MIARA_CHILD_ID` | The child to write to. `--child` does the same. |
+| `MIARA_CHILD_ID` | The child to write to. `--child` does the same. For several children, set `child_id` on each row in `map()` instead. |
 | `MIARA_BASE` | The API address. Defaults to `https://getmiara.com/api/v1`. |
 
-Flags: `--sandbox` (the public token and the sandbox's first child), `--dry-run`, `--since <time>`, `--full` (ignore the last sync and fetch everything), `--state <file>`.
+Flags: `--sandbox` (the public token and the sandbox's first child), `--dry-run`, `--since <time>`, `--full` (ignore the last sync and fetch everything), `--state <file>`, `--every <seconds>` (keep running; see below).
 
 ## Schedule it
 
-`state.json` remembers when the last run finished, so each run asks `fetch` only for what's new. Run it every 15 minutes to an hour; nothing breaks if a run is late or is skipped.
+`state.json` remembers when the last run finished and what was sent. Each run asks `fetch` for everything since a little before the last run (`LOOKBACK`, 6 hours by default), because most services finish or correct a record after the fact: a sleep gets its end, a feed its amount. Only rows that changed since they were sent go to Miara, so re-reading is cheap. Nothing breaks if a run is late or is skipped.
+
+**How often.** For a family that checks the app during a nap, every 15 minutes feels slow. Two ways to do better:
+
+- `python bridge.py --every 120` keeps running and syncs every 2 minutes. While it waits it holds `GET /wait` open, and Miara answers that as soon as someone in the family opens the app, so a fresh sync starts within seconds. Run it under launchd's `KeepAlive` or systemd's `Restart=always`.
+- Be kind to the service you read from, especially one without an official API: check often when something is happening (a sleep is going on), and less when it's quiet.
+
+**A sleep as it happens.** Send a sleep with `started_at` and no `ended_at` when it starts; it shows as going on. Send it again with the same `source_event_id` and an `ended_at` when it ends. If the service later gives the finished sleep its own id, keep the first id (match them by overlapping times). A second id for the same sleep comes back `suggested` against your own entry.
 
 | Where | File |
 |---|---|
 | cron (Linux, macOS) | `schedule/crontab.example` |
+| Keep running (`--every`) | `schedule/com.example.miara-bridge.plist` with `KeepAlive` (see the comment inside) |
 | launchd (macOS) | `schedule/com.example.miara-bridge.plist` |
 | systemd (Linux) | `schedule/miara-bridge.service` and `.timer` |
 | GitHub Actions | `.github/workflows/bridge.yml` |
